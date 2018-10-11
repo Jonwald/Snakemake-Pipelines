@@ -1,4 +1,7 @@
+
+##configfile containes dataset specific detailes, eg filenames###
 configfile: "config.yaml"
+
 rule all:
     input:
         expand(directory("fastqc_pre_trimming/{sample}"),sample=config["samples"]),
@@ -8,7 +11,8 @@ rule all:
 	expand("interleaved/{sample}.interleaved.fastq.gz", sample=config["samples"]),
         expand("classified/{sample}.kj_out", sample=config["samples"]),
         expand("classified/{sample}.{rank}.tidied.report", sample=config["samples"], rank=config["rank"])
-        
+
+### fastqc reads before trimming ####
 rule fastqc_pre_trimming:
     input:
         fq1 = "data/{sample}_1.fastq.gz",
@@ -20,6 +24,7 @@ rule fastqc_pre_trimming:
         "mkdir {output}; \
 	fastqc -t 5 -o {output} {input.fq1} {input.fq2}"
 
+## quality / adapter trim reads
 rule trim:
     input:
         fq1 = "data/{sample}_1.fastq.gz",
@@ -34,6 +39,8 @@ rule trim:
         trimq=10 minlength=60 ref={input.ref} \
         threads=30"
 
+
+## run fastqc on trimmed reads###
 rule fastqc_post_trimming:
     input:
         fq1 = "trimmed/{sample}_1.trimmed.fastq.gz",
@@ -45,6 +52,8 @@ rule fastqc_post_trimming:
         "mkdir {output}; \
 	fastqc -t 5 -o {output} {input.fq1} {input.fq2}"
 
+
+## interleave PE files ##
 rule interleave:
     input:
         fq1 = "trimmed/{sample}_1.trimmed.fastq.gz",
@@ -56,8 +65,7 @@ rule interleave:
         "~/programs/bbmap/reformat.sh in1={input.fq1} in2={input.fq2} out={output}"
 
 
-####seems to work up to this point
-## run through kaiju
+## run through kaiju for annotation ###
 rule kaiju_classify:
     input:
         "interleaved/{sample}.interleaved.fastq.gz"
@@ -68,7 +76,9 @@ rule kaiju_classify:
         "/mnt/scratch/users/15452069/kaiju/bin/./kaiju -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
         -f /mnt/scratch/users/15452069/kaiju/db/kaiju_db_nr_euk.fmi -z 40 -a greedy -e 5 -i <(gunzip -c {input}) \
         -s 60 -o {output}"
-
+	
+	
+## produce reports for each taxonomic rank ####
 rule kaiju_report:
     input:
         "classified/{sample}.kj_out"
@@ -94,6 +104,8 @@ rule kaiju_report:
         /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
          -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r phylum -o {output.phy}"
 
+
+## tidy up report files ###
 rule tidy_abudannces:
     input:
       "classified/{sample}.{rank}.report"
