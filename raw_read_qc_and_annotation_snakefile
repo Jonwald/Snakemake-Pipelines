@@ -1,0 +1,104 @@
+configfile: "config.yaml"
+rule all:
+    input:
+        expand(directory("fastqc_pre_trimming/{sample}"),sample=config["samples"]),
+        expand("trimmed/{sample}_1.trimmed.fastq.gz", sample=config["samples"]),
+        expand("trimmed/{sample}_2.trimmed.fastq.gz", sample=config["samples"]),
+        expand(directory("fastqc_post_trimming/{sample}"), sample=config["samples"]),
+	expand("interleaved/{sample}.interleaved.fastq.gz", sample=config["samples"]),
+        expand("classified/{sample}.kj_out", sample=config["samples"]),
+        expand("classified/{sample}.{rank}.tidied.report", sample=config["samples"], rank=config["rank"])
+        
+rule fastqc_pre_trimming:
+    input:
+        fq1 = "data/{sample}_1.fastq.gz",
+        fq2 = "data/{sample}_2.fastq.gz",
+    output:
+        directory("fastqc_pre_trimming/{sample}")
+    threads: 30
+    shell:
+        "mkdir {output}; \
+	fastqc -t 5 -o {output} {input.fq1} {input.fq2}"
+
+rule trim:
+    input:
+        fq1 = "data/{sample}_1.fastq.gz",
+        fq2 = "data/{sample}_2.fastq.gz",
+        ref="adapters/adapters.fa"
+    output:
+        fq1 = "trimmed/{sample}_1.trimmed.fastq.gz",
+        fq2 = "trimmed/{sample}_2.trimmed.fastq.gz",
+    threads: 30
+    shell:
+        "~/programs/bbmap/bbduk.sh in1={input.fq1} in2={input.fq2} out1={output.fq1} out2={output.fq2} qtrim=rl \
+        trimq=10 minlength=60 ref={input.ref} \
+        threads=30"
+
+rule fastqc_post_trimming:
+    input:
+        fq1 = "trimmed/{sample}_1.trimmed.fastq.gz",
+        fq2 = "trimmed/{sample}_2.trimmed.fastq.gz"
+    output:
+        directory("fastqc_post_trimming/{sample}")
+    threads: 30
+    shell:
+        "mkdir {output}; \
+	fastqc -t 5 -o {output} {input.fq1} {input.fq2}"
+
+rule interleave:
+    input:
+        fq1 = "trimmed/{sample}_1.trimmed.fastq.gz",
+        fq2 = "trimmed/{sample}_2.trimmed.fastq.gz"
+    threads: 30
+    output:
+        "interleaved/{sample}.interleaved.fastq.gz"
+    shell:
+        "~/programs/bbmap/reformat.sh in1={input.fq1} in2={input.fq2} out={output}"
+
+
+####seems to work up to this point
+## run through kaiju
+rule kaiju_classify:
+    input:
+        "interleaved/{sample}.interleaved.fastq.gz"
+    output:
+        "classified/{sample}.kj_out"
+    threads: 30
+    shell:
+        "/mnt/scratch/users/15452069/kaiju/bin/./kaiju -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+        -f /mnt/scratch/users/15452069/kaiju/db/kaiju_db_nr_euk.fmi -z 40 -a greedy -e 5 -i <(gunzip -c {input}) \
+        -s 60 -o {output}"
+
+rule kaiju_report:
+    input:
+        "classified/{sample}.kj_out"
+    output:
+        spe = "classified/{sample}.species.report",
+        gen = "classified/{sample}.genus.report",
+        ord = "classified/{sample}.order.report",
+        fam = "classified/{sample}.family.report",
+        clas = "classified/{sample}.class.report",
+        phy = "classified/{sample}.phylum.report"
+    threads: 30
+    shell:
+        "/mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r species -o {output.spe}; \
+        /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r genus -o {output.gen}; \
+        /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r order -o {output.ord}; \
+        /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r family -o {output.fam}; \
+        /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r class -o {output.clas}; \
+        /mnt/scratch/users/15452069/kaiju/bin/./kaijuReport -t /mnt/scratch/users/15452069/kaiju/db/nodes.dmp \
+         -n /mnt/scratch/users/15452069/kaiju/db/names.dmp -i {input} -r phylum -o {output.phy}"
+
+rule tidy_abudannces:
+    input:
+      "classified/{sample}.{rank}.report"
+    output:
+        "classified/{sample}.{rank}.tidied.report"
+    threads: 30
+    shell:
+        "sort -k1,1gr {input} | head -n -4 > {output}"
